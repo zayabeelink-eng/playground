@@ -3,215 +3,53 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>Pitfall Runner</title>
+<title>🎮 Game Arcade</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;overflow:hidden;background:#000;touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;font-family:monospace}
-#wrap{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column}
-#hud{height:32px;min-height:32px;background:#111;color:#fff;display:flex;align-items:center;padding:0 10px;font-size:13px;flex-shrink:0}
-#hud .sc{color:#e94560}
-#hud .lv{color:#e94560;margin-left:14px}
-#hud .br{flex:1;height:5px;background:#333;margin-left:12px;border-radius:3px;overflow:hidden}
-#hud .bf{height:100%;background:#e94560;width:0%}
-#gbox{flex:1;position:relative;overflow:hidden;min-height:0}
-#gbox canvas{position:absolute;top:0;left:0;width:100%!important;height:100%!important}
-#ov{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:10}
-#ov h1{font-size:26px;margin-bottom:10px}
-#ov p{color:#fff;font-size:14px}
-#ctrl{height:110px;min-height:110px;background:#0a0a0a;display:flex;justify-content:space-between;align-items:center;padding:0 24px;flex-shrink:0}
-.cg{display:flex;gap:12px}
-.b{width:64px;height:64px;border-radius:14px;background:rgba(233,69,96,.3);border:2px solid #e94560;color:#fff;font-size:28px;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;cursor:pointer}
-.b:active{background:rgba(233,69,96,.7)}
-.b.j{width:90px;height:68px;font-size:15px;font-weight:700;border-color:#0c0;background:rgba(0,180,0,.25)}
-.b.j:active{background:rgba(0,180,0,.6)}
+html,body{min-height:100vh;background:#0f0f23;color:#e0e0e0;font-family:'Segoe UI',system-ui,sans-serif}
+body{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px}
+h1{font-size:2.4rem;margin-bottom:8px;background:linear-gradient(90deg,#e94560,#f5c518,#4fc3f7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.subtitle{color:#888;margin-bottom:40px;font-size:1rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:24px;max-width:800px;width:100%}
+.card{background:#1a1a2e;border:1px solid #2a2a4a;border-radius:16px;padding:28px;text-decoration:none;color:inherit;transition:transform .2s,box-shadow .2s,border-color .2s;cursor:pointer;display:flex;flex-direction:column;align-items:center;text-align:center}
+.card:hover{transform:translateY(-4px);box-shadow:0 8px 32px rgba(233,69,96,.2);border-color:#e94560}
+.card .icon{font-size:3rem;margin-bottom:12px}
+.card h2{font-size:1.3rem;margin-bottom:8px;color:#fff}
+.card p{color:#999;font-size:.9rem;line-height:1.4}
+.card .tag{display:inline-block;margin-top:14px;padding:4px 12px;border-radius:20px;font-size:.75rem;font-weight:600}
+.tag.action{background:#e94560;color:#fff}
+.tag.runner{background:#f5c518;color:#000}
+.tag.fly{background:#4fc3f7;color:#000}
+footer{margin-top:48px;color:#555;font-size:.8rem}
 </style>
 </head>
 <body>
-<div id="wrap">
-  <div id="hud"><span class="sc" id="hs">0</span><span class="lv" id="hl">♥♥♥</span><div class="br"><div class="bf" id="hb"></div></div></div>
-  <div id="gbox">
-    <canvas id="c"></canvas>
-    <div id="ov"><h1 id="ot" style="color:#e94560">PITFALL RUNNER</h1><p id="os">Tap to start</p></div>
+  <h1>🎮 Game Arcade</h1>
+  <p class="subtitle">Pick a game and play!</p>
+
+  <div class="grid">
+    <a class="card" href="pitfall.html">
+      <span class="icon">🏃</span>
+      <h2>Pitfall!</h2>
+      <p>Classic side-scrolling adventure. Jump over pits, swing on vines, collect treasures.</p>
+      <span class="tag action">Classic</span>
+    </a>
+
+    <a class="card" href="pitfall_runner.html">
+      <span class="icon">💨</span>
+      <h2>Pitfall Runner</h2>
+      <p>Endless runner version. Dodge obstacles and survive as long as you can!</p>
+      <span class="tag runner">Endless</span>
+    </a>
+
+    <a class="card" href="airplane.html">
+      <span class="icon">✈️</span>
+      <h2>Airplane Dodger</h2>
+      <p>Steer your plane through the sky. Dodge incoming obstacles — how far can you go?</p>
+      <span class="tag fly">Arcade</span>
+    </a>
   </div>
-  <div id="ctrl">
-    <div class="cg"><div class="b" id="bL">◀</div><div class="b" id="bR">▶</div></div>
-    <div class="cg"><div class="b j" id="bJ">JUMP</div></div>
-  </div>
-</div>
-<script>
-(function(){
-var area=document.getElementById('gbox');
-var cv=document.getElementById('c');
-var cx=cv.getContext('2d');
-var ov=document.getElementById('ov');
-var ot=document.getElementById('ot');
-var os=document.getElementById('os');
 
-function rsz(){cv.width=area.clientWidth;cv.height=area.clientHeight;}
-rsz();
-window.addEventListener('resize',rsz);
-
-var G=0.55,JF=-10.5,MS=4.5,LL=12000;
-var st='menu',sc=0,lv=3,cam=0,fr=0;
-var plats=[],pits=[],gems=[],foes=[],parts=[],logs=[];
-var P={};
-
-function gy(){return cv.height-46;}
-
-function rP(){P={x:80,y:gy()-38,w:24,h:36,vx:0,vy:0,g:false,f:1,af:0,at:0,inv:0};}
-
-var inp={l:0,r:0,j:0};
-
-function tb(id,k){
-  var el=document.getElementById(id);
-  var on=function(e){e.preventDefault();inp[k]=1;};
-  var off=function(e){e.preventDefault();inp[k]=0;};
-  el.addEventListener('touchstart',on,{passive:false});
-  el.addEventListener('touchend',off,{passive:false});
-  el.addEventListener('touchcancel',off);
-  el.addEventListener('mousedown',on);
-  el.addEventListener('mouseup',off);
-  el.addEventListener('mouseleave',off);
-}
-tb('bL','l');tb('bR','r');tb('bJ','j');
-
-document.addEventListener('keydown',function(e){
-  if(e.code==='ArrowLeft'||e.code==='KeyA')inp.l=1;
-  if(e.code==='ArrowRight'||e.code==='KeyD')inp.r=1;
-  if(e.code==='ArrowUp'||e.code==='KeyW'||e.code==='Space')inp.j=1;
-});
-document.addEventListener('keyup',function(e){
-  if(e.code==='ArrowLeft'||e.code==='KeyA')inp.l=0;
-  if(e.code==='ArrowRight'||e.code==='KeyD')inp.r=0;
-  if(e.code==='ArrowUp'||e.code==='KeyW'||e.code==='Space')inp.j=0;
-});
-
-function showO(t,s,c){ot.textContent=t;ot.style.color=c||'#e94560';os.textContent=s;ov.style.display='flex';}
-function hideO(){ov.style.display='none';}
-
-// Use both touch and click with stopPropagation to prevent issues
-ov.addEventListener('touchstart',function(e){e.preventDefault();e.stopPropagation();if(st!=='playing')startGame();},{passive:false});
-ov.addEventListener('click',function(e){e.stopPropagation();if(st!=='playing')startGame();});
-
-function startGame(){sc=0;lv=3;cam=0;fr=0;rP();gL();st='playing';hideO();uH();}
-
-function gL(){
-  plats=[];pits=[];gems=[];foes=[];logs=[];parts=[];
-  var gx=0;
-  while(gx<LL){
-    var sl=200+Math.random()*400;
-    if(gx>400&&Math.random()<0.22){
-      var pw=60+Math.random()*60;pits.push({x:gx+sl,w:pw});
-      if(Math.random()<0.5)logs.push({x:gx+sl-10,y:gy()-10,w:pw+20,h:12,bp:Math.random()*6.28});
-      gx+=sl+pw;
-    }else{plats.push({x:gx,y:gy(),w:sl,h:46});gx+=sl;}
-  }
-  for(var i=0;i<30;i++)plats.push({x:300+Math.random()*(LL-600),y:gy()-80-Math.random()*120,w:60+Math.random()*100,h:16});
-  for(var i=0;i<45;i++)gems.push({x:200+Math.random()*(LL-400),y:gy()-40-Math.random()*140,w:18,h:18,t:Math.random()<0.2?'d':'g',got:0,bp:Math.random()*6.28});
-  for(var i=0;i<22;i++){
-    var ex=500+Math.random()*(LL-700);
-    foes.push({x:ex,y:gy()-26,w:26,h:26,vx:(Math.random()<0.5?-1:1)*(1+Math.random()),ps:ex-50-Math.random()*50,pe:ex+50+Math.random()*50,alive:1,t:Math.random()<0.3?'c':'l',ap:Math.random()*6.28});
-  }
-}
-
-function sp(x,y,c,n){for(var i=0;i<n;i++)parts.push({x:x,y:y,vx:(Math.random()-.5)*6,vy:(Math.random()-1)*5,l:15+Math.random()*20,c:c,s:2+Math.random()*3});}
-function ht(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
-
-function uH(){
-  document.getElementById('hs').textContent=sc;
-  var h='';for(var i=0;i<lv;i++)h+='♥';document.getElementById('hl').textContent=h;
-  document.getElementById('hb').style.width=Math.min(P.x/LL*100,100)+'%';
-}
-
-function update(){
-  fr++;if(st!=='playing')return;
-  if(inp.l){P.vx=-MS;P.f=-1;}else if(inp.r){P.vx=MS;P.f=1;}else P.vx=0;
-  if(inp.j&&P.g){P.vy=JF;P.g=false;}
-  P.vy+=G;P.x+=P.vx;P.y+=P.vy;
-  if(P.vx){P.at++;if(P.at>6){P.at=0;P.af=(P.af+1)%4;}}else P.af=0;
-  if(P.inv>0)P.inv--;
-  P.g=false;
-  for(var i=0;i<plats.length;i++){
-    var p=plats[i];
-    if(P.vy>=0&&ht({x:P.x,y:P.y+P.h-4,w:P.w,h:8},{x:p.x,y:p.y-4,w:p.w,h:p.h+8})){P.y=p.y-P.h;P.vy=0;P.g=true;}
-  }
-  for(var i=0;i<logs.length;i++){
-    var l=logs[i];l.bp+=0.03;l.y+=Math.sin(l.bp)*0.3;
-    if(P.vy>=0&&ht({x:P.x,y:P.y+P.h-4,w:P.w,h:8},{x:l.x,y:l.y-4,w:l.w,h:l.h+8})){P.y=l.y-P.h;P.vy=0;P.g=true;}
-  }
-  if(P.y>cv.height+80){die();return;}
-  for(var i=0;i<gems.length;i++){
-    var g=gems[i];
-    if(!g.got&&ht(P,g)){g.got=1;sc+=g.t==='d'?500:100;sp(g.x+9,g.y+9,g.t==='d'?'#0ff':'#fd0',10);}
-  }
-  for(var i=0;i<foes.length;i++){
-    var f=foes[i];if(!f.alive)continue;
-    f.x+=f.vx;f.ap+=0.1;
-    if(f.x<=f.ps||f.x>=f.pe)f.vx*=-1;
-    if(ht(P,f)){
-      if(P.vy>0&&P.y+P.h-8<f.y+f.h/2){f.alive=0;P.vy=JF*0.6;sc+=200;sp(f.x+13,f.y,'#f60',8);}
-      else if(P.inv<=0){die();return;}
-    }
-  }
-  for(var i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx;p.y+=p.vy;p.vy+=0.15;p.l--;if(p.l<=0)parts.splice(i,1);}
-  var tc=P.x-cv.width*0.35;cam+=(tc-cam)*0.12;if(cam<0)cam=0;
-  if(P.x>LL-200){st='win';showO('YOU WIN!','Score: '+sc+' — Tap again','#fd0');}
-  uH();
-}
-
-function die(){
-  lv--;sp(P.x+12,P.y+18,'#f00',14);
-  if(lv<=0){st='dead';showO('GAME OVER','Score: '+sc+' — Tap retry','#f00');}
-  else{P.x=Math.max(cam+100,80);P.y=gy()-100;P.vy=0;P.inv=90;}
-  uH();
-}
-
-function draw(){
-  var W=cv.width,H=cv.height,g=gy();
-  if(W<2||H<2)return;
-  var sg=cx.createLinearGradient(0,0,0,H);
-  sg.addColorStop(0,'#0f3460');sg.addColorStop(1,'#1a1a2e');
-  cx.fillStyle=sg;cx.fillRect(0,0,W,H);
-  cx.fillStyle='#0a1628';cx.beginPath();cx.moveTo(0,H);
-  for(var x=0;x<=W;x+=25)cx.lineTo(x,H-85+Math.sin((x+cam*0.2)*0.008)*40);
-  cx.lineTo(W,H);cx.fill();
-  cx.save();cx.translate(-cam,0);
-  for(var i=0;i<pits.length;i++){
-    var p=pits[i];cx.fillStyle='#050510';cx.fillRect(p.x,g,p.w,H-g+200);
-    cx.fillStyle='#ff440044';cx.fillRect(p.x+4,g+10+Math.sin(fr*0.05)*4,p.w-8,22);
-  }
-  for(var i=0;i<plats.length;i++){
-    var p=plats[i];cx.fillStyle='#3a2f1f';cx.fillRect(p.x,p.y,p.w,p.h);
-    cx.fillStyle='#4a8c3f';cx.fillRect(p.x,p.y,p.w,5);
-  }
-  for(var i=0;i<logs.length;i++){var l=logs[i];cx.fillStyle='#8B4513';cx.fillRect(l.x,l.y,l.w,l.h);}
-  for(var i=0;i<gems.length;i++){
-    var g2=gems[i];if(g2.got)continue;g2.bp+=0.05;var yy=g2.y+Math.sin(g2.bp)*4;
-    cx.fillStyle=g2.t==='d'?'#0ff':'#fd0';cx.fillRect(g2.x+3,yy+3,g2.w-6,g2.h-6);
-  }
-  for(var i=0;i<foes.length;i++){
-    var f=foes[i];if(!f.alive)continue;var by=Math.sin(f.ap)*2;
-    cx.fillStyle=f.t==='c'?'#cc3333':'#66aa33';cx.fillRect(f.x+3,f.y+4+by,f.w-6,f.h-8);
-    cx.fillStyle='#fff';cx.fillRect(f.x+6,f.y+6+by,4,4);
-  }
-  for(var i=0;i<parts.length;i++){var p=parts[i];cx.globalAlpha=p.l/35;cx.fillStyle=p.c;cx.fillRect(p.x-p.s/2,p.y-p.s/2,p.s,p.s);}
-  cx.globalAlpha=1;
-  if(P.inv<=0||Math.floor(P.inv/3)%2===0){
-    var px=P.x,py=P.y;
-    cx.fillStyle='#e94560';cx.fillRect(px+4,py+12,16,13);
-    cx.fillStyle='#ffcc99';cx.fillRect(px+6,py+2,14,12);
-    cx.fillStyle='#333';cx.fillRect(P.f>0?px+14:px+8,py+5,4,4);
-    cx.fillStyle='#2a1f12';cx.fillRect(px+4,py,16,5);
-    cx.fillStyle='#2a4a7f';cx.fillRect(px+4,py+25,6,11);cx.fillRect(px+14,py+25,6,11);
-  }
-  cx.fillStyle='#888';cx.fillRect(LL-100,g-105,4,105);
-  cx.fillStyle='#e94560';cx.beginPath();cx.moveTo(LL-96,g-105);cx.lineTo(LL-50+Math.sin(fr*0.08)*3,g-92);cx.lineTo(LL-96,g-82);cx.fill();
-  cx.restore();
-}
-
-(function lp(){update();draw();requestAnimationFrame(lp);})();
-showO('PITFALL RUNNER','Tap to start','#e94560');
-})();
-</script>
+  <footer>Built with ❤️ by Zaya</footer>
 </body>
 </html>

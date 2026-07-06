@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Airplane Dodger</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;font-family:monospace}
+#wrap{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column}
+#hud{height:36px;min-height:36px;background:#0f3460;color:#fff;display:flex;align-items:center;padding:0 12px;font-size:14px;flex-shrink:0}
+#hud .sc{color:#e94560}
+#hud .hi{color:#f5c518;margin-left:14px}
+#gbox{flex:1;position:relative;overflow:hidden;min-height:0;background:linear-gradient(180deg,#1a1a2e 0%,#16213e 100%)}
+#gbox canvas{position:absolute;top:0;left:0;width:100%!important;height:100%!important}
+#ov{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.82);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:10}
+#ov.hidden{display:none}
+#ov h1{font-size:28px;color:#e94560;margin-bottom:6px}
+#ov h2{font-size:16px;color:#f5c518;margin-bottom:14px}
+#ov p{color:#aaa;font-size:13px;margin-bottom:18px;text-align:center;line-height:1.6}
+#ov button{background:#e94560;color:#fff;border:none;padding:12px 36px;font-size:16px;font-family:monospace;cursor:pointer;border-radius:6px}
+#ov button:active{background:#c73650}
+#homeBtn{position:absolute;top:8px;right:10px;z-index:5;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:18px;padding:4px 10px;border-radius:4px;cursor:pointer;text-decoration:none}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <span>SCORE: <span class="sc" id="score">0</span></span>
+    <span class="hi" id="hiscore">BEST: 0</span>
+  </div>
+  <div id="gbox">
+    <canvas id="c"></canvas>
+    <a id="homeBtn" href="index.html" title="Home">🏠</a>
+    <div id="ov">
+      <h1>✈️ Airplane Dodger</h1>
+      <h2 id="finalScore"></h2>
+      <p>Drag or use arrow keys to steer.<br>Dodge the red obstacles!</p>
+      <button id="startBtn">START</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+const gbox=document.getElementById('gbox');
+const ov=document.getElementById('ov');
+const scoreEl=document.getElementById('score');
+const hiEl=document.getElementById('hiscore');
+const finalEl=document.getElementById('finalScore');
+const startBtn=document.getElementById('startBtn');
+
+let W,H,running=false,animId;
+let player={x:0,y:0,w:40,h:30,speed:6};
+let obstacles=[];
+let particles=[];
+let score=0,hiScore=parseInt(localStorage.getItem('ap_hi')||'0');
+let spawnTimer=0,spawnRate=50;
+let speed=2.5;
+let keys={};
+let drag=null;
+let clouds=[];
+
+hiEl.textContent='BEST: '+hiScore;
+
+function resize(){
+  W=gbox.clientWidth;
+  H=gbox.clientHeight;
+  canvas.width=W;canvas.height=H;
+  player.y=H-60;
+}
+window.addEventListener('resize',resize);
+resize();
+
+// Clouds
+for(let i=0;i<8;i++){
+  clouds.push({x:Math.random()*W,y:Math.random()*H,r:20+Math.random()*40,a:.05+Math.random()*.08});
+}
+
+function drawPlane(x,y,w,h){
+  ctx.save();
+  ctx.translate(x+w/2,y+h/2);
+  // body
+  ctx.fillStyle='#4fc3f7';
+  ctx.beginPath();
+  ctx.moveTo(0,-h/2);
+  ctx.lineTo(w/3,h/2);
+  ctx.lineTo(-w/3,h/2);
+  ctx.closePath();
+  ctx.fill();
+  // wings
+  ctx.fillStyle='#0288d1';
+  ctx.beginPath();
+  ctx.moveTo(-w/2,h/6);
+  ctx.lineTo(w/2,h/6);
+  ctx.lineTo(w/3,h/3);
+  ctx.lineTo(-w/3,h/3);
+  ctx.closePath();
+  ctx.fill();
+  // tail
+  ctx.fillStyle='#01579b';
+  ctx.beginPath();
+  ctx.moveTo(-8,-h/2+4);
+  ctx.lineTo(8,-h/2+4);
+  ctx.lineTo(0,-h/2);
+  ctx.closePath();
+  ctx.fill();
+  // cockpit
+  ctx.fillStyle='#b3e5fc';
+  ctx.beginPath();
+  ctx.arc(0,-h/6,5,0,Math.PI*2);
+  ctx.fill();
+  // engine glow
+  ctx.fillStyle='rgba(255,152,0,.6)';
+  ctx.beginPath();
+  ctx.arc(0,h/2+4,4+Math.random()*3,0,Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function spawnObstacle(){
+  const types=['circle','rect','diamond'];
+  const type=types[Math.floor(Math.random()*types.length)];
+  const s=20+Math.random()*30;
+  obstacles.push({
+    x:Math.random()*(W-2*s)+s,
+    y:-s,
+    size:s,
+    type:type,
+    color:'#e94560'
+  });
+}
+
+function spawnParticle(x,y){
+  for(let i=0;i<6;i++){
+    particles.push({
+      x:x,y:y,
+      vx:(Math.random()-.5)*4,
+      vy:(Math.random()-.5)*4,
+      life:20+Math.random()*10,
+      color:`hsl(${Math.random()*60+10},100%,60%)`
+    });
+  }
+}
+
+function drawObstacle(o){
+  ctx.fillStyle=o.color;
+  ctx.shadowColor=o.color;
+  ctx.shadowBlur=8;
+  ctx.beginPath();
+  if(o.type==='circle'){
+    ctx.arc(o.x,o.y,o.size,0,Math.PI*2);
+  }else if(o.type==='rect'){
+    ctx.save();
+    ctx.translate(o.x,o.y);
+    ctx.rotate(score*.01);
+    ctx.fillRect(-o.size,-o.size,o.size*2,o.size*2);
+    ctx.restore();
+  }else{
+    ctx.moveTo(o.x,o.y-o.size);
+    ctx.lineTo(o.x+o.size,o.y);
+    ctx.lineTo(o.x,o.y+o.size);
+    ctx.lineTo(o.x-o.size,o.y);
+    ctx.closePath();
+  }
+  ctx.fill();
+  ctx.shadowBlur=0;
+}
+
+function collides(ax,ay,aw,ah,ob){
+  const ox=ob.x-aw/2,oy=ob.y-ah/2;
+  return ax+aw>ox && ax<ox+ob.size*2 && ay+ah>oy && ay<oy+ob.size*2;
+}
+
+function update(){
+  // Input
+  if(keys.ArrowLeft||keys.a) player.x-=player.speed;
+  if(keys.ArrowRight||keys.d) player.x+=player.speed;
+  if(keys.ArrowUp||keys.w) player.y-=player.speed;
+  if(keys.ArrowDown||keys.s) player.y+=player.speed;
+  if(drag){
+    const dx=drag.curX-drag.startX;
+    const dy=drag.curY-drag.startY;
+    player.x+=dx/drag.sensitivity;
+    player.y+=dy/drag.sensitivity;
+    drag.startX=drag.curX;
+    drag.startY=drag.curY;
+  }
+  // Clamp
+  player.x=Math.max(0,Math.min(W-player.w,player.x));
+  player.y=Math.max(0,Math.min(H-player.h,player.y));
+
+  // Spawn
+  spawnTimer++;
+  if(spawnTimer>=spawnRate){spawnTimer=0;spawnObstacle();}
+  // Speed up
+  speed=2.5+score*.02;
+  spawnRate=Math.max(15,50-score*.15);
+
+  // Move obstacles
+  for(let i=obstacles.length-1;i>=0;i--){
+    obstacles[i].y+=speed;
+    if(obstacles[i].y>H+50){
+      obstacles.splice(i,1);
+      score++;
+      scoreEl.textContent=score;
+      continue;
+    }
+    // Collision
+    if(collides(player.x,player.y,player.w,player.h,obstacles[i])){
+      spawnParticle(player.x+player.w/2,player.y+player.h/2);
+      gameOver();
+      return;
+    }
+  }
+
+  // Particles
+  for(let i=particles.length-1;i>=0;i--){
+    particles[i].x+=particles[i].vx;
+    particles[i].y+=particles[i].vy;
+    particles[i].life--;
+    if(particles[i].life<=0) particles.splice(i,1);
+  }
+
+  // Clouds
+  for(const c of clouds){
+    c.y+=.3;
+    if(c.y>H+c.r){c.y=-c.r;c.x=Math.random()*W;}
+  }
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  // Stars
+  ctx.fillStyle='rgba(255,255,255,.3)';
+  for(let i=0;i<30;i++){
+    const sx=(i*137.5+score*.5)%W;
+    const sy=(i*97.3+score*.3)%H;
+    ctx.fillRect(sx,sy,1,1);
+  }
+  // Clouds
+  for(const c of clouds){
+    ctx.fillStyle=`rgba(255,255,255,${c.a})`;
+    ctx.beginPath();
+    ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
+    ctx.fill();
+  }
+  // Obstacles
+  for(const o of obstacles) drawObstacle(o);
+  // Particles
+  for(const p of particles){
+    ctx.globalAlpha=p.life/30;
+    ctx.fillStyle=p.color;
+    ctx.fillRect(p.x-2,p.y-2,4,4);
+  }
+  ctx.globalAlpha=1;
+  // Player
+  drawPlane(player.x,player.y,player.w,player.h);
+}
+
+function loop(){
+  if(!running) return;
+  update();
+  draw();
+  animId=requestAnimationFrame(loop);
+}
+
+function gameOver(){
+  running=false;
+  cancelAnimationFrame(animId);
+  if(score>hiScore){hiScore=score;localStorage.setItem('ap_hi',''+hiScore);hiEl.textContent='BEST: '+hiScore;}
+  finalEl.textContent='Score: '+score;
+  startBtn.textContent='RETRY';
+  ov.classList.remove('hidden');
+}
+
+function startGame(){
+  score=0;scoreEl.textContent='0';
+  obstacles=[];particles=[];spawnTimer=0;speed=2.5;spawnRate=50;
+  player.x=W/2-player.w/2;player.y=H-60;
+  ov.classList.add('hidden');
+  running=true;
+  loop();
+}
+
+startBtn.addEventListener('click',startGame);
+
+// Keyboard
+window.addEventListener('keydown',e=>{keys[e.key]=true;e.preventDefault();});
+window.addEventListener('keyup',e=>{keys[e.key]=false;});
+
+// Touch
+let touchStart=null;
+canvas.addEventListener('touchstart',e=>{
+  e.preventDefault();
+  const t=e.touches[0];
+  touchStart={x:t.clientX,y:t.clientY};
+  drag={startX:t.clientX,startY:t.clientY,curX:t.clientX,curY:t.clientY,sensitivity:1};
+},{passive:false});
+canvas.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  const t=e.touches[0];
+  if(drag){drag.curX=t.clientX;drag.curY=t.clientY;}
+},{passive:false});
+canvas.addEventListener('touchend',()=>{drag=null;touchStart=null;});
+
+// Mouse drag
+let mouseDown=false;
+canvas.addEventListener('mousedown',e=>{mouseDown=true;drag={startX:e.clientX,startY:e.clientY,curX:e.clientX,curY:e.clientY,sensitivity:1};});
+canvas.addEventListener('mousemove',e=>{if(mouseDown&&drag){drag.curX=e.clientX;drag.curY=e.clientY;}});
+canvas.addEventListener('mouseup',()=>{mouseDown=false;drag=null;});
+
+})();
+</script>
+</body>
+</html>
