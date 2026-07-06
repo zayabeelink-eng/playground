@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pitfall!</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; font-family: monospace; }
+canvas { display: block; image-rendering: pixelated; }
+#ui { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); color: #0f0; font-size: 14px; text-align: center; pointer-events: none; }
+#controls { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); color: #888; font-size: 11px; text-align: center; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="ui">
+  <span id="score">SCORE: 0</span> &nbsp;|&nbsp;
+  <span id="time">TIME: 20:00</span> &nbsp;|&nbsp;
+  <span id="lives">LIVES: 3</span> &nbsp;|&nbsp;
+  <span id="treasure">TREASURE: 0/32</span>
+</div>
+<div id="controls">← → Move &nbsp;|&nbsp; ↑ Jump &nbsp;|&nbsp; ↓ Slide &nbsp;|&nbsp; SPACE Restart</div>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// Responsive canvas
+const W = 800, H = 450;
+canvas.width = W;
+canvas.height = H;
+
+// Colors
+const COLORS = {
+  sky: '#1a3a5c',
+  treeFar: '#2d5a27',
+  treeNear: '#1a4a15',
+  ground: '#5a3a1a',
+  groundTop: '#3a7a2a',
+  water: '#2a5a8a',
+  pit: '#0a0a0a',
+  player: '#ff6600',
+  playerSkin: '#ffcc99',
+  treasure: '#ffd700',
+  treasureShine: '#fff8dc',
+  snake: '#22aa22',
+  alligator: '#5a7a3a',
+  log: '#6a4a2a',
+  quicksand: '#8a7a4a',
+  fire: '#ff4400',
+  skull: '#cccccc',
+  bridge: '#5a3a1a',
+  vine: '#2a6a1a',
+};
+
+// Game state
+let gameState = 'title'; // title, playing, dead, gameover
+let score = 0;
+let timeLeft = 20 * 60; // 20 minutes in seconds
+let lives = 3;
+let treasureCount = 0;
+let cameraX = 0;
+let deathTimer = 0;
+let titleBlink = 0;
+
+// Segment definitions
+const SEGMENT_WIDTH = 1200;
+const TOTAL_SEGMENTS = 4;
+const WORLD_WIDTH = SEGMENT_WIDTH * TOTAL_SEGMENTS;
+
+// Player
+let player = {
+  x: 50, y: 0, vx: 0, vy: 0,
+  width: 20, height: 30,
+  onGround: false, jumping: false, sliding: false,
+  slideTimer: 0, facing: 1, // 1=right, -1=left
+  animFrame: 0, animTimer: 0,
+  dead: false, invincible: 0,
+};
+
+// Level data
+let segments = [];
+let treasures = [];
+let hazards = [];
+let logs = [];
+let vines = [];
+
+function buildLevel() {
+  segments = [];
+  treasures = [];
+  hazards = [];
+  logs = [];
+  vines = [];
+
+  for (let s = 0; s < TOTAL_SEGMENTS; s++) {
+    const baseX = s * SEGMENT_WIDTH;
+    segments.push({ x: baseX, width: SEGMENT_WIDTH });
+
+    // Generate hazards and treasures for each segment
+    const seed = s * 1000;
+    const rand = (offset) => {
+      const n = Math.sin(seed + offset) * 43758.5453;
+      return n - Math.floor(n);
+    };
+
+    // Pits
+    const pitCount = 2 + Math.floor(rand(1) * 2);
+    for (let p = 0; p < pitCount; p++) {
+      const px = baseX + 150 + Math.floor(rand(10 + p * 3) * 700);
+      hazards.push({ type: 'pit', x: px, y: H - 60, width: 60 + rand(20 + p) * 40, height: 60 });
+    }
+
+    // Snakes
+    const snakeCount = 1 + Math.floor(rand(30) * 2);
+    for (let sn = 0; sn < snakeCount; sn++) {
+      const sx = baseX + 200 + Math.floor(rand(40 + sn * 7) * 700);
+      hazards.push({ type: 'snake', x: sx, y: H - 80, width: 30, height: 15,
+        animFrame: 0, animTimer: 0, active: true, hitTimer: 0 });
+    }
+
+    // Alligators (in water areas)
+    if (rand(60) > 0.4) {
+      const ax = baseX + 300 + Math.floor(rand(70) * 500);
+      hazards.push({ type: 'alligator', x: ax, y: H - 75, width: 40, height: 12,
+        animFrame: 0, animTimer: 0, dir: 1, range: 100 });
+    }
+
+    // Fire barriers
+    if (rand(80) > 0.5) {
+      const fx = baseX + 400 + Math.floor(rand(90) * 400);
+      hazards.push({ type: 'fire', x: fx, y: H - 100, width: 20, height: 40,
+        animFrame: 0, animTimer: 0 });
+    }
+
+    // Skulls
+    if (rand(100) > 0.5) {
+      const skx = baseX + 250 + Math.floor(rand(110) * 600);
+      hazards.push({ type: 'skull', x: skx, y: H - 75, width: 20, height: 20,
+        animFrame: 0, animTimer: 0 });
+    }
+
+    // Logs over pits
+    for (let h of hazards) {
+      if (h.type === 'pit' && rand(120 + h.x) > 0.5) {
+        logs.push({ x: h.x - 10, y: H - 68, width: h.width + 20, height: 12 });
+      }
+    }
+
+    // Quick sand patches
+    if (rand(200) > 0.6) {
+      const qx = baseX + 200 + Math.floor(rand(210) * 600);
+      hazards.push({ type: 'quicksand', x: qx, y: H - 65, width: 50, height: 10,
+        sink: 0, maxSink: 20 });
+    }
+
+    // Vines to swing on
+    if (rand(300) > 0.5) {
+      const vx = baseX + 350 + Math.floor(rand(310) * 400);
+      // Place vine over a pit if possible
+      vines.push({ x: vx, y: 0, length: 100 + rand(320) * 80,
+        angle: 0, angularVel: 0, active: true });
+    }
+
+    // Treasure! 8 per segment
+    for (let t = 0; t < 8; t++) {
+      const tx = baseX + 100 + Math.floor(rand(400 + t * 13) * 900);
+      const ty = H - 75 - Math.floor(rand(500 + t * 7) * 30);
+      treasures.push({ x: tx, y: ty, width: 20, height: 20, collected: false,
+        type: ['gold', 'silver', 'jewel', 'stocking', 'clock', 'picture', 'ring', 'gem'][t % 8],
+        animTimer: 0 });
+    }
+  }
+}
+
+function resetPlayer() {
+  player.x = 50;
+  player.y = H - 100;
+  player.vx = 0;
+  player.vy = 0;
+  player.onGround = false;
+  player.jumping = false;
+  player.sliding = false;
+  player.slideTimer = 0;
+  player.dead = false;
+  player.invincible = 0;
+  player.facing = 1;
+  cameraX = 0;
+}
+
+function resetGame() {
+  score = 0;
+  timeLeft = 20 * 60;
+  lives = 3;
+  treasureCount = 0;
+  gameState = 'playing';
+  buildLevel();
+  resetPlayer();
+}
+
+// Input handling
+const keys = {};
+document.addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (gameState === 'title' || gameState === 'gameover') {
+      resetGame();
+    } else if (gameState === 'playing' && player.dead) {
+      // do nothing, wait for death timer
+    }
+  }
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+    e.preventDefault();
+  }
+});
+document.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+// Touch controls for mobile
+let touchLeft = false, touchRight = false, touchJump = false, touchSlide = false;
+canvas.addEventListener('touchstart', handleTouch, { passive: false });
+canvas.addEventListener('touchmove', handleTouch, { passive: false });
+canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+
+function handleTouch(e) {
+  e.preventDefault();
+  touchLeft = false; touchRight = false; touchJump = false; touchSlide = false;
+  for (let t of e.touches) {
+    const rect = canvas.getBoundingClientRect();
+    const x = (t.clientX - rect.left) / rect.width;
+    const y = (t.clientY - rect.top) / rect.height;
+    if (y < 0.5) touchJump = true;
+    else if (y >= 0.5 && x < 0.33) touchLeft = true;
+    else if (y >= 0.5 && x > 0.66) touchRight = true;
+    else touchSlide = true;
+  }
+  if (gameState === 'title' || gameState === 'gameover') {
+    resetGame();
+  }
+}
+
+function handleTouchEnd(e) {
+  e.preventDefault();
+  if (e.touches.length === 0) {
+    touchLeft = false; touchRight = false; touchJump = false; touchSlide = false;
+  } else {
+    handleTouch(e);
+  }
+}
+
+function inputLeft() { return keys['ArrowLeft'] || keys['KeyA'] || touchLeft; }
+function inputRight() { return keys['ArrowRight'] || keys['KeyD'] || touchRight; }
+function inputJump() { return keys['ArrowUp'] || keys['KeyW'] || keys['Space'] || touchJump; }
+function inputSlide() { return keys['ArrowDown'] || keys['KeyS'] || touchSlide; }
+
+// Collision
+function rectCollide(a, b) {
+  return a.x < b.x + b.width && a.x + a.width > b.x &&
+         a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+// Physics and game logic
+const GRAVITY = 0.5;
+const JUMP_FORCE = -9;
+const MOVE_SPEED = 3;
+const GROUND_Y = H - 60;
+
+let lastJumpState = false;
+let lastTime = Date.now();
+
+function update() {
+  const now = Date.now();
+  const dt = Math.min((now - lastTime) / 16.67, 3); // normalize to 60fps
+  lastTime = now;
+
+  titleBlink += 0.05 * dt;
+
+  if (gameState !== 'playing') return;
+
+  if (player.dead) {
+    deathTimer += dt;
+    if (deathTimer > 90) {
+      lives--;
+      if (lives <= 0) {
+        gameState = 'gameover';
+      } else {
+        resetPlayer();
+      }
+    }
+    return;
+  }
+
+  // Timer
+  timeLeft -= dt / 60;
+  if (timeLeft <= 0) {
+    timeLeft = 0;
+    gameState = 'gameover';
+    return;
+  }
+
+  // Invincibility frames
+  if (player.invincible > 0) player.invincible -= dt;
+
+  // Horizontal movement
+  if (!player.sliding) {
+    if (inputLeft()) { player.vx = -MOVE_SPEED; player.facing = -1; }
+    else if (inputRight()) { player.vx = MOVE_SPEED; player.facing = 1; }
+    else player.vx = 0;
+  }
+
+  // Jumping
+  const jumpPressed = inputJump();
+  if (jumpPressed && !lastJumpState && player.onGround && !player.sliding) {
+    player.vy = JUMP_FORCE;
+    player.onGround = false;
+    player.jumping = true;
+  }
+  lastJumpState = jumpPressed;
+
+  // Sliding
+  if (inputSlide() && player.onGround && !player.sliding && Math.abs(player.vx) > 0) {
+    player.sliding = true;
+    player.slideTimer = 30 * dt;
+  }
+
+  if (player.sliding) {
+    player.slideTimer -= dt;
+    if (player.slideTimer <= 0) player.sliding = false;
+  }
+
+  // Gravity
+  player.vy += GRAVITY * dt;
+
+  // Move X
+  player.x += player.vx * dt;
+  if (player.x < 0) player.x = 0;
+  if (player.x > WORLD_WIDTH - player.width) player.x = WORLD_WIDTH - player.width;
+
+  // Move Y
+  player.y += player.vy * dt;
+
+  // Ground collision
+  const playerBottom = player.y + (player.sliding ? 15 : player.height);
+  player.onGround = false;
+
+  // Check if standing on solid ground (not over a pit)
+  let overPit = false;
+  let onLog = false;
+  let inQuicksand = false;
+
+  for (let h of hazards) {
+    if (h.type === 'pit') {
+      const playerCenter = player.x + player.width / 2;
+      if (playerCenter > h.x && playerCenter < h.x + h.width && playerBottom >= GROUND_Y - 5) {
+        overPit = true;
+      }
+    }
+    if (h.type === 'quicksand') {
+      if (rectCollide(player, h)) {
+        inQuicksand = true;
+        h.sink = Math.min(h.sink + 0.3 * dt, h.maxSink);
+      }
+    }
+  }
+
+  // Check log collision
+  for (let log of logs) {
+    if (rectCollide({ x: player.x, y: player.y, width: player.width, height: 5 }, log)) {
+      onLog = true;
+      if (playerBottom >= log.y && player.vy >= 0) {
+        player.y = log.y - (player.sliding ? 15 : player.height);
+        player.vy = 0;
+        player.onGround = true;
+        player.jumping = false;
+      }
+    }
+  }
+
+  // Ground
+  if (!overPit) {
+    if (playerBottom >= GROUND_Y) {
+      player.y = GROUND_Y - (player.sliding ? 15 : player.height);
+      player.vy = 0;
+      player.onGround = true;
+      player.jumping = false;
+    }
+  }
+
+  // Fall into pit
+  if (overPit && !onLog && player.y > H) {
+    killPlayer();
+  }
+
+  // Hazard collisions
+  if (player.invincible <= 0) {
+    for (let h of hazards) {
+      if (h.type === 'snake' && h.active && h.hitTimer <= 0) {
+        if (rectCollide(player, h)) {
+          if (player.vy > 0 && player.y < h.y) {
+            // Stomp snake
+            h.active = false;
+            h.hitTimer = 60;
+            score += 100;
+            player.vy = JUMP_FORCE * 0.5;
+          } else {
+            killPlayer();
+          }
+        }
+      }
+      if (h.type === 'alligator') {
+        if (rectCollide(player, h)) {
+          if (player.vy > 0 && player.y < h.y) {
+            score += 100;
+            player.vy = JUMP_FORCE * 0.5;
+          } else {
+            killPlayer();
+          }
+        }
+      }
+      if (h.type === 'fire') {
+        if (rectCollide(player, { x: h.x - 5, y: h.y, width: h.width + 10, height: h.height })) {
+          killPlayer();
+        }
+      }
+      if (h.type === 'skull') {
+        if (rectCollide(player, h)) {
+          killPlayer();
+        }
+      }
+    }
+  }
+
+  // Treasure collection
+  for (let t of treasures) {
+    if (!t.collected && rectCollide(player, t)) {
+      t.collected = true;
+      treasureCount++;
+      score += 1000;
+    }
+  }
+
+  // Animation
+  player.animTimer += dt;
+  if (player.animTimer > 6) {
+    player.animTimer = 0;
+    player.animFrame = (player.animFrame + 1) % 4;
+  }
+
+  // Update hazards
+  for (let h of hazards) {
+    h.animTimer += dt;
+    if (h.type === 'snake') {
+      if (h.hitTimer > 0) h.hitTimer -= dt;
+      if (h.hitTimer <= 30 && h.hitTimer > 0) h.active = true;
+    }
+    if (h.type === 'alligator') {
+      h.x += h.dir * 0.5 * dt;
+      if (Math.abs(h.x % 100) > h.range) h.dir *= -1;
+    }
+  }
+
+  // Camera
+  const targetCam = player.x - W / 3;
+  cameraX += (targetCam - cameraX) * 0.1 * dt;
+  if (cameraX < 0) cameraX = 0;
+  if (cameraX > WORLD_WIDTH - W) cameraX = WORLD_WIDTH - W;
+
+  // Update UI
+  document.getElementById('score').textContent = 'SCORE: ' + score;
+  const mins = Math.floor(timeLeft / 60);
+  const secs = Math.floor(timeLeft % 60);
+  document.getElementById('time').textContent = 'TIME: ' + mins + ':' + (secs < 10 ? '0' : '') + secs;
+  document.getElementById('lives').textContent = 'LIVES: ' + lives;
+  document.getElementById('treasure').textContent = 'TREASURE: ' + treasureCount + '/32';
+}
+
+function killPlayer() {
+  if (player.dead || player.invincible > 0) return;
+  player.dead = true;
+  deathTimer = 0;
+  player.vy = -6;
+}
+
+// Drawing functions
+function drawBackground() {
+  // Sky gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#0a1a3a');
+  grad.addColorStop(0.6, '#1a3a5c');
+  grad.addColorStop(1, '#2a5a3a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Stars
+  ctx.fillStyle = '#ffffff';
+  for (let i = 0; i < 30; i++) {
+    const sx = (i * 137 + 50) % W;
+    const sy = (i * 73 + 20) % (H * 0.4);
+    const brightness = 0.3 + 0.7 * Math.sin(titleBlink + i);
+    ctx.globalAlpha = brightness;
+    ctx.fillRect(sx, sy, 2, 2);
+  }
+  ctx.globalAlpha = 1;
+
+  // Far trees (parallax)
+  ctx.fillStyle = COLORS.treeFar;
+  for (let i = 0; i < 20; i++) {
+    const tx = ((i * 100 - cameraX * 0.2) % (W + 100)) - 50;
+    const th = 60 + (i % 3) * 20;
+    drawTree(tx, H - 60, th, COLORS.treeFar);
+  }
+
+  // Near trees (parallax)
+  ctx.fillStyle = COLORS.treeNear;
+  for (let i = 0; i < 15; i++) {
+    const tx = ((i * 130 - cameraX * 0.5) % (W + 130)) - 65;
+    const th = 50 + (i % 4) * 15;
+    drawTree(tx, H - 60, th, COLORS.treeNear);
+  }
+}
+
+function drawTree(x, baseY, height, color) {
+  // Trunk
+  ctx.fillStyle = '#3a2a1a';
+  ctx.fillRect(x - 3, baseY - height * 0.4, 6, height * 0.4);
+  // Canopy
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x, baseY - height);
+  ctx.lineTo(x + 15, baseY - height * 0.3);
+  ctx.lineTo(x - 15, baseY - height * 0.3);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x, baseY - height * 0.8);
+  ctx.lineTo(x + 20, baseY - height * 0.15);
+  ctx.lineTo(x - 20, baseY - height * 0.15);
+  ctx.fill();
+}
+
+function drawGround() {
+  // Ground
+  ctx.fillStyle = COLORS.groundTop;
+  ctx.fillRect(0, H - 60, W, 8);
+
+  ctx.fillStyle = COLORS.ground;
+  ctx.fillRect(0, H - 52, W, 52);
+
+  // Ground texture
+  ctx.fillStyle = '#4a2a0a';
+  for (let i = 0; i < 40; i++) {
+    const gx = ((i * 50 - cameraX) % W + W) % W;
+    ctx.fillRect(gx, H - 40 + (i % 3) * 10, 8, 2);
+  }
+}
+
+function drawPits() {
+  for (let h of hazards) {
+    if (h.type !== 'pit') continue;
+    const sx = h.x - cameraX;
+    if (sx > -h.width && sx < W + 50) {
+      // Pit hole
+      ctx.fillStyle = COLORS.pit;
+      ctx.fillRect(sx, H - 60, h.width, 60);
+
+      // Danger stripes at edges
+      ctx.fillStyle = '#aa6600';
+      ctx.fillRect(sx - 3, H - 65, 6, 8);
+      ctx.fillRect(sx + h.width - 3, H - 65, 6, 8);
+    }
+  }
+}
+
+function drawLogs() {
+  for (let log of logs) {
+    const sx = log.x - cameraX;
+    if (sx > -log.width && sx < W + 50) {
+      ctx.fillStyle = COLORS.log;
+      ctx.fillRect(sx, log.y, log.width, log.height);
+      // Log texture
+      ctx.fillStyle = '#5a3a1a';
+      for (let i = 0; i < log.width; i += 15) {
+        ctx.fillRect(sx + i, log.y + 2, 1, log.height - 4);
+      }
+      // Log ends
+      ctx.fillStyle = '#8a6a3a';
+      ctx.beginPath();
+      ctx.arc(sx, log.y + log.height / 2, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(sx + log.width, log.y + log.height / 2, 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+function drawPlayer() {
+  if (player.dead) {
+    // Death animation - flying up
+    ctx.save();
+    ctx.globalAlpha = 0.7;
+    drawPlayerSprite(player.x - cameraX, player.y - player.vy * 5, true);
+    ctx.restore();
+    return;
+  }
+
+  if (player.invincible > 0 && Math.floor(player.invincible) % 4 < 2) return;
+
+  drawPlayerSprite(player.x - cameraX, player.y, false);
+}
+
+function drawPlayerSprite(sx, sy, dead) {
+  ctx.save();
+  ctx.translate(sx + player.width / 2, sy + (player.sliding ? 15 : player.height));
+  ctx.scale(player.facing, 1);
+
+  if (player.sliding) {
+    // Sliding pose
+    // Body (horizontal)
+    ctx.fillStyle = COLORS.player;
+    ctx.fillRect(-10, -15, 20, 10);
+    // Head
+    ctx.fillStyle = COLORS.playerSkin;
+    ctx.fillRect(-12, -15, 8, 8);
+    // Legs extended
+    ctx.fillStyle = '#2244aa';
+    ctx.fillRect(5, -12, 10, 5);
+  } else if (dead) {
+    // Death pose
+    ctx.fillStyle = COLORS.player;
+    ctx.fillRect(-8, -25, 16, 15);
+    ctx.fillStyle = COLORS.playerSkin;
+    ctx.fillRect(-6, -30, 12, 8);
+    // Arms up
+    ctx.fillStyle = COLORS.playerSkin;
+    ctx.fillRect(-12, -25, 6, 4);
+    ctx.fillRect(6, -25, 6, 4);
+    // Legs
+    ctx.fillStyle = '#2244aa';
+    ctx.fillRect(-6, -10, 5, 12);
+    ctx.fillRect(1, -10, 5, 12);
+  } else {
+    // Walking/standing animation
+    const legOffset = player.onGround && Math.abs(player.vx) > 0 ?
+      Math.sin(player.animFrame * Math.PI / 2) * 4 : 0;
+
+    // Legs
+    ctx.fillStyle = '#2244aa';
+    ctx.fillRect(-5, -12, 5, 12 + legOffset);
+    ctx.fillRect(0, -12, 5, 12 - legOffset);
+
+    // Body
+    ctx.fillStyle = COLORS.player;
+    ctx.fillRect(-8, -25, 16, 15);
+
+    // Head
+    ctx.fillStyle = COLORS.playerSkin;
+    ctx.fillRect(-6, -32, 12, 9);
+
+    // Hat
+    ctx.fillStyle = '#aa4400';
+    ctx.fillRect(-7, -34, 14, 4);
+    ctx.fillRect(-4, -36, 8, 3);
+
+    // Arms
+    const armSwing = player.onGround && Math.abs(player.vx) > 0 ?
+      Math.sin(player.animFrame * Math.PI / 2) * 6 : 0;
+    ctx.fillStyle = COLORS.playerSkin;
+    ctx.fillRect(-12, -24 + armSwing, 5, 4);
+    ctx.fillRect(7, -24 - armSwing, 5, 4);
+
+    // Eyes
+    ctx.fillStyle = '#000';
+    ctx.fillRect(2, -30, 2, 2);
+  }
+
+  ctx.restore();
+}
+
+function drawHazards() {
+  for (let h of hazards) {
+    const sx = h.x - cameraX;
+    if (sx > -50 && sx < W + 50) {
+      if (h.type === 'snake') {
+        drawSnake(sx, h.y, h);
+      } else if (h.type === 'alligator') {
+        drawAlligator(sx, h.y, h);
+      } else if (h.type === 'fire') {
+        drawFire(sx, h.y, h);
+      } else if (h.type === 'skull') {
+        drawSkull(sx, h.y, h);
+      } else if (h.type === 'quicksand') {
+        drawQuicksand(sx, h.y, h);
+      }
+    }
+  }
+}
+
+function drawSnake(sx, sy, h) {
+  if (!h.active) return;
+  const frame = Math.floor(h.animTimer / 8) % 4;
+  ctx.fillStyle = COLORS.snake;
+
+  // Body segments
+  for (let i = 0; i < 4; i++) {
+    const bx = sx + i * 7;
+    const by = sy + Math.sin(frame + i) * 3;
+    ctx.fillRect(bx, by, 8, 8);
+  }
+
+  // Head
+  ctx.fillStyle = '#118811';
+  ctx.fillRect(sx + 25, sy - 2, 8, 10);
+
+  // Eyes
+  ctx.fillStyle = '#ff0';
+  ctx.fillRect(sx + 30, sy, 2, 2);
+
+  // Tongue
+  if (frame % 2 === 0) {
+    ctx.fillStyle = '#f00';
+    ctx.fillRect(sx + 33, sy + 3, 5, 1);
+    ctx.fillRect(sx + 37, sy + 2, 2, 1);
+    ctx.fillRect(sx + 37, sy + 5, 2, 1);
+  }
+}
+
+function drawAlligator(sx, sy, h) {
+  const frame = Math.floor(h.animTimer / 10) % 2;
+  ctx.fillStyle = COLORS.alligator;
+
+  // Body
+  ctx.fillRect(sx, sy, 40, 12);
+
+  // Head
+  ctx.fillRect(sx + (h.dir > 0 ? 35 : -10), sy - 3, 15, 10);
+
+  // Jaw
+  if (frame === 0) {
+    ctx.fillRect(sx + (h.dir > 0 ? 38 : -8), sy + 7, 10, 3);
+  }
+
+  // Eyes
+  ctx.fillStyle = '#ff0';
+  ctx.fillRect(sx + (h.dir > 0 ? 42 : -5), sy - 1, 3, 3);
+
+  // Tail
+  ctx.fillStyle = COLORS.alligator;
+  ctx.fillRect(sx + (h.dir > 0 ? -5 : 35), sy + 2, 8, 6);
+}
+
+function drawFire(sx, sy, h) {
+  const frame = Math.floor(h.animTimer / 4) % 3;
+  // Fire glow
+  ctx.fillStyle = 'rgba(255, 68, 0, 0.3)';
+  ctx.beginPath();
+  ctx.arc(sx + 10, sy + 20, 25, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Flames
+  const colors = ['#ff4400', '#ff8800', '#ffcc00'];
+  for (let i = 0; i < 3; i++) {
+    ctx.fillStyle = colors[(frame + i) % 3];
+    const fx = sx + i * 7 - 5;
+    const fy = sy + 10 - Math.sin(h.animTimer * 0.3 + i) * 8;
+    ctx.fillRect(fx, fy, 8, 20);
+  }
+
+  // Base
+  ctx.fillStyle = '#444';
+  ctx.fillRect(sx - 5, sy + 30, 30, 10);
+}
+
+function drawSkull(sx, sy, h) {
+  ctx.fillStyle = COLORS.skull;
+  // Skull shape
+  ctx.fillRect(sx + 3, sy, 14, 12);
+  ctx.fillRect(sx + 5, sy + 12, 10, 6);
+
+  // Eyes
+  ctx.fillStyle = '#000';
+  ctx.fillRect(sx + 5, sy + 3, 4, 4);
+  ctx.fillRect(sx + 11, sy + 3, 4, 4);
+
+  // Teeth
+  ctx.fillStyle = COLORS.skull;
+  ctx.fillRect(sx + 6, sy + 14, 2, 3);
+  ctx.fillRect(sx + 9, sy + 14, 2, 3);
+  ctx.fillRect(sx + 12, sy + 14, 2, 3);
+}
+
+function drawQuicksand(sx, sy, h) {
+  ctx.fillStyle = COLORS.quicksand;
+  ctx.fillRect(sx, sy, h.width, h.height);
+
+  // Bubbles
+  ctx.fillStyle = '#aa9a5a';
+  const bubbleCount = 3;
+  for (let i = 0; i < bubbleCount; i++) {
+    const bx = sx + ((h.animTimer * 0.5 + i * 17) % h.width);
+    const by = sy + Math.sin(h.animTimer * 0.1 + i * 2) * 3;
+    ctx.beginPath();
+    ctx.arc(bx, by, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawTreasures() {
+  for (let t of treasures) {
+    if (t.collected) continue;
+    const sx = t.x - cameraX;
+    if (sx > -30 && sx < W + 30) {
+      t.animTimer += 0.03;
+      const bob = Math.sin(t.animTimer * 3) * 3;
+      const glow = 0.5 + 0.5 * Math.sin(t.animTimer * 2);
+
+      // Glow
+      ctx.fillStyle = `rgba(255, 215, 0, ${0.2 + glow * 0.2})`;
+      ctx.beginPath();
+      ctx.arc(sx + 10, t.y + 10 + bob, 16, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Treasure item
+      ctx.fillStyle = COLORS.treasure;
+      ctx.fillRect(sx + 3, t.y + 3 + bob, 14, 14);
+      ctx.fillStyle = COLORS.treasureShine;
+      ctx.fillRect(sx + 5, t.y + 5 + bob, 4, 4);
+
+      // Sparkle
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(sx + 8 + Math.sin(t.animTimer * 5) * 5, t.y + bob, 2, 2);
+    }
+  }
+}
+
+function drawTitleScreen() {
+  // Background
+  drawBackground();
+  drawGround();
+
+  // Dark overlay
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Title
+  const blink = Math.sin(titleBlink) > 0;
+  ctx.textAlign = 'center';
+
+  // Title shadow
+  ctx.fillStyle = '#000';
+  ctx.font = 'bold 64px monospace';
+  ctx.fillText('PITFALL!', W / 2 + 3, 153);
+
+  // Title text
+  ctx.fillStyle = '#ff6600';
+  ctx.font = 'bold 64px monospace';
+  ctx.fillText('PITFALL!', W / 2, 150);
+
+  // Subtitle
+  ctx.fillStyle = '#ffd700';
+  ctx.font = '20px monospace';
+  ctx.fillText('Jungle Adventure', W / 2, 185);
+
+  // Start prompt
+  if (blink) {
+    ctx.fillStyle = '#0f0';
+    ctx.font = '24px monospace';
+    ctx.fillText('PRESS SPACE TO START', W / 2, 280);
+  }
+
+  // Instructions
+  ctx.fillStyle = '#888';
+  ctx.font = '14px monospace';
+  ctx.fillText('Arrow Keys / WASD to move', W / 2, 340);
+  ctx.fillText('Up / W / Space to jump', W / 2, 360);
+  ctx.fillText('Down / S to slide', W / 2, 380);
+  ctx.fillText('Collect all 32 treasures!', W / 2, 410);
+
+  ctx.textAlign = 'left';
+}
+
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ff0000';
+  ctx.font = 'bold 48px monospace';
+  ctx.fillText('GAME OVER', W / 2, 180);
+
+  ctx.fillStyle = '#ffd700';
+  ctx.font = '24px monospace';
+  ctx.fillText('Score: ' + score, W / 2, 230);
+  ctx.fillText('Treasures: ' + treasureCount + '/32', W / 2, 260);
+
+  const blink = Math.sin(titleBlink) > 0;
+  if (blink) {
+    ctx.fillStyle = '#0f0';
+    ctx.font = '20px monospace';
+    ctx.fillText('PRESS SPACE TO PLAY AGAIN', W / 2, 320);
+  }
+  ctx.textAlign = 'left';
+}
+
+function drawDeath() {
+  ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+  ctx.font = 'bold 36px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('OUCH!', W / 2, H / 2);
+  ctx.textAlign = 'left';
+}
+
+function drawMinimap() {
+  const mapW = 200, mapH = 12;
+  const mapX = W - mapW - 10, mapY = 10;
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.fillRect(mapX - 2, mapY - 2, mapW + 4, mapH + 4);
+
+  ctx.fillStyle = '#333';
+  ctx.fillRect(mapX, mapY, mapW, mapH);
+
+  // Player position
+  const px = mapX + (player.x / WORLD_WIDTH) * mapW;
+  ctx.fillStyle = '#0f0';
+  ctx.fillRect(px - 2, mapY, 4, mapH);
+
+  // Collected treasures
+  for (let t of treasures) {
+    if (t.collected) {
+      const tx = mapX + (t.x / WORLD_WIDTH) * mapW;
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(tx, mapY + 2, 2, mapH - 4);
+    }
+  }
+
+  // Uncollected treasures
+  for (let t of treasures) {
+    if (!t.collected) {
+      const tx = mapX + (t.x / WORLD_WIDTH) * mapW;
+      ctx.fillStyle = '#666';
+      ctx.fillRect(tx, mapY + 3, 1, mapH - 6);
+    }
+  }
+}
+
+function drawTouchControls() {
+  if (!('ontouchstart' in window)) return;
+  ctx.fillStyle = 'rgba(255,255,255,0.1)';
+  ctx.font = '12px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('← LEFT', W * 0.17, H - 20);
+  ctx.fillText('SLIDE', W * 0.5, H - 20);
+  ctx.fillText('RIGHT →', W * 0.83, H - 20);
+  ctx.fillText('↑ JUMP ↑', W / 2, 40);
+  ctx.textAlign = 'left';
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+
+  if (gameState === 'title') {
+    drawTitleScreen();
+    return;
+  }
+
+  drawBackground();
+  drawGround();
+  drawPits();
+  drawLogs();
+  drawTreasures();
+  drawHazards();
+  drawPlayer();
+
+  if (player.dead) drawDeath();
+  drawMinimap();
+  drawTouchControls();
+
+  if (gameState === 'gameover') {
+    drawGameOver();
+  }
+}
+
+// Game loop
+function gameLoop() {
+  update();
+  render();
+  requestAnimationFrame(gameLoop);
+}
+
+// Start
+buildLevel();
+gameLoop();
+</script>
+</body>
+</html>
