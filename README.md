@@ -33,6 +33,8 @@ and visit `http://localhost:8000`.
 
 The repository is deployed to GitHub Pages via [`.github/workflows/pages.yml`](.github/workflows/pages.yml), which runs on every push to `main`. The home page (`index.html`) links to all games.
 
+**Play it here:** https://zayabeelink-eng.github.io/playground/
+
 ## ➕ Adding a New Game
 
 1. Drop a new single-file game into the repo root (e.g. `my_game.html`).
